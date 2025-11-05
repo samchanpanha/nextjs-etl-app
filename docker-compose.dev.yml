@@ -1,0 +1,58 @@
+# Development Docker Compose with SQLite
+version: '3.8'
+
+services:
+  # Main Application (with multiple instances for load balancing)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: etl-app
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: file:./dev.db
+      REDIS_URL: redis://redis:6379
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-your-secret-key}
+      NEXTAUTH_URL: http://localhost:8080
+      JWT_SECRET: ${JWT_SECRET:-your-jwt-secret}
+      PORT: 3000
+      INSTANCE_ID: app1
+    ports:
+      - "8080:3000"
+    volumes:
+      - ./prisma/dev.db:/app/prisma/dev.db
+      - ./workflows:/app/workflows
+    networks:
+      - etl-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for caching (optional for development)
+  redis:
+    image: redis:7-alpine
+    container_name: etl-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - etl-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  etl-network:
+    driver: bridge

@@ -1,0 +1,259 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  createdJobs  ETLJob[]
+  notifications Notification[]
+  settings      UserSettings?
+  workflows     Workflow[]
+  
+  @@map("users")
+}
+
+model UserSettings {
+  id         String @id @default(cuid())
+  userId     String @unique
+  theme      String @default("light")
+  timezone   String @default("UTC")
+  language   String @default("en")
+  
+  // Notification preferences
+  emailNotifications  Boolean @default(true)
+  telegramNotifications Boolean @default(false)
+  telegramChatId      String?
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("user_settings")
+}
+
+model DataSource {
+  id          String       @id @default(cuid())
+  name        String
+  type        DataSourceType
+  connectionString String
+  description String?
+  isActive    Boolean      @default(true)
+  lastSynced  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  
+  // Relations
+  jobs        ETLJob[] @relation("JobSource")
+  targetJobs  ETLJob[] @relation("JobTarget")
+  syncLogs    SyncLog[]
+  
+  @@map("data_sources")
+}
+
+model ETLJob {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  sourceId    String
+  targetId    String
+  query       String?    // Custom SQL query for extraction
+  transformRules String? // JSON string for transformation rules
+  schedule    String?    // Cron expression
+  isActive    Boolean    @default(true)
+  status      JobStatus  @default(PENDING)
+  createdBy   String
+  lastRun     DateTime?
+  nextRun     DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relations
+  source      DataSource @relation("JobSource", fields: [sourceId], references: [id])
+  target      DataSource @relation("JobTarget", fields: [targetId], references: [id])
+  creator     User       @relation(fields: [createdBy], references: [id])
+  syncLogs    SyncLog[]
+  executions  JobExecution[]
+  
+  @@map("etl_jobs")
+}
+
+model JobExecution {
+  id          String           @id @default(cuid())
+  jobId       String
+  status      ExecutionStatus  @default(RUNNING)
+  startedAt   DateTime         @default(now())
+  completedAt DateTime?
+  recordsProcessed Int       @default(0)
+  recordsSuccess   Int       @default(0)
+  recordsFailed    Int       @default(0)
+  errorMessage String?
+  logs        String?          // JSON array of log entries
+  
+  // Relations
+  job         ETLJob           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  
+  @@map("job_executions")
+}
+
+model SyncLog {
+  id          String       @id @default(cuid())
+  sourceId    String
+  jobId       String?
+  level       LogLevel     @default(INFO)
+  message     String
+  details     String?      // JSON string for additional details
+  timestamp   DateTime     @default(now())
+  
+  // Relations
+  source      DataSource?  @relation(fields: [sourceId], references: [id])
+  job         ETLJob?      @relation(fields: [jobId], references: [id])
+  
+  @@map("sync_logs")
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  userId      String
+  type        NotificationType
+  title       String
+  message     String
+  isRead      Boolean          @default(false)
+  channels    String?   // JSON string of channels used
+  sentAt      DateTime         @default(now())
+  
+  // Relations
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("notifications")
+}
+
+model SystemSettings {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String   // JSON string for complex values
+  description String?
+  updatedAt   DateTime @updatedAt
+  
+  @@map("system_settings")
+}
+
+// Enums
+enum Role {
+  ADMIN
+  USER
+  VIEWER
+}
+
+enum DataSourceType {
+  MYSQL
+  POSTGRESQL
+  SQLITE
+  MONGODB
+  API
+  CSV
+  JSON
+  EXCEL
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  PAUSED
+}
+
+enum ExecutionStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+enum NotificationType {
+  JOB_SUCCESS
+  JOB_FAILURE
+  SYSTEM_ALERT
+  DATA_SOURCE_ERROR
+  SCHEDULE_INFO
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  TELEGRAM
+}
+
+model Workflow {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  version     String    @default("1.0.0")
+  status      WorkflowStatus @default(DRAFT)
+  tags        String?   // JSON array of tags
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  createdBy   String
+  
+  // Workflow configuration
+  steps       String?   // JSON array of workflow steps
+  connections String?   // JSON array of connections
+  trigger     String?   // JSON trigger configuration
+  resources   String?   // JSON resource allocation
+  
+  // Relations
+  creator     User      @relation(fields: [createdBy], references: [id])
+  executions  WorkflowExecution[]
+  
+  @@map("workflows")
+}
+
+model WorkflowExecution {
+  id            String              @id @default(cuid())
+  workflowId    String
+  status        ExecutionStatus     @default(RUNNING)
+  startedAt     DateTime            @default(now())
+  completedAt   DateTime?
+  progress      Int                 @default(0) // 0-100
+  currentStep   String?
+  totalSteps    Int                 @default(0)
+  completedSteps Int                @default(0)
+  errorMessage  String?
+  logs          String?             // JSON array of log entries
+  metrics       String?             // JSON metrics data
+  
+  // Relations
+  workflow      Workflow            @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  
+  @@map("workflow_executions")
+}
+
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}

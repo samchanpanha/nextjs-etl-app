@@ -1,0 +1,309 @@
+{
+  "id": "advanced-analytics-pipeline",
+  "name": "Advanced Analytics Pipeline",
+  "description": "Complex ETL with AI-powered data analysis",
+  "version": "2.1.0",
+  "status": "active",
+  "created_at": "2025-11-05T14:53:30Z",
+  "updated_at": "2025-11-05T14:53:30Z",
+  "tags": ["advanced", "analytics", "ai", "machine-learning"],
+  
+  "trigger": {
+    "type": "event",
+    "events": ["data_ingestion_complete", "daily_processing"],
+    "description": "Triggered by data ingestion or daily schedule"
+  },
+  
+  "steps": [
+    {
+      "id": "parallel-extract",
+      "name": "Parallel Data Extraction",
+      "type": "parallel",
+      "config": {
+        "parallel_steps": [
+          {
+            "id": "extract-sales",
+            "name": "Extract Sales Data",
+            "type": "extract",
+            "config": {
+              "source": {
+                "type": "database",
+                "connection": "postgres://localhost:5432/sales_db",
+                "query": "SELECT * FROM sales_data WHERE date >= CURRENT_DATE - INTERVAL '30 days'"
+              }
+            }
+          },
+          {
+            "id": "extract-customers",
+            "name": "Extract Customer Data",
+            "type": "extract",
+            "config": {
+              "source": {
+                "type": "api",
+                "endpoint": "https://api.crm.com/v1/customers",
+                "headers": {
+                  "Authorization": "Bearer {{env.CRM_API_TOKEN}}"
+                },
+                "rate_limit": "100/min"
+              }
+            }
+          },
+          {
+            "id": "extract-products",
+            "name": "Extract Product Data",
+            "type": "extract",
+            "config": {
+              "source": {
+                "type": "file",
+                "path": "/data/products/*.csv",
+                "format": "csv",
+                "encoding": "utf-8"
+              }
+            }
+          }
+        ]
+      },
+      "timeout": "45m",
+      "retry": {
+        "max_attempts": 2,
+        "delay": "10m"
+      }
+    },
+    {
+      "id": "ai-data-quality",
+      "name": "AI-Powered Data Quality Assessment",
+      "type": "ai",
+      "config": {
+        "model": "data_quality_assessor",
+        "inputs": ["{{parallel-extract.output}}"],
+        "analysis": [
+          "missing_data_detection",
+          "outlier_detection",
+          "data_consistency_check",
+          "anomaly_detection"
+        ],
+        "confidence_threshold": 0.85,
+        "auto_correction": {
+          "enabled": true,
+          "actions": ["fill_missing", "remove_outliers", "standardize_formats"]
+        }
+      },
+      "timeout": "30m",
+      "depends_on": ["parallel-extract"],
+      "retry": {
+        "max_attempts": 1,
+        "delay": "5m"
+      }
+    },
+    {
+      "id": "feature-engineering",
+      "name": "Advanced Feature Engineering",
+      "type": "transform",
+      "config": {
+        "ai_enhanced": true,
+        "features": [
+          {
+            "type": "temporal",
+            "field": "transaction_date",
+            "operations": ["day_of_week", "month", "quarter", "is_weekend", "days_since_epoch"]
+          },
+          {
+            "type": "categorical_encoding",
+            "field": "product_category",
+            "method": "target_encoding"
+          },
+          {
+            "type": "aggregation",
+            "group_by": ["customer_id"],
+            "operations": ["sum", "avg", "count", "std"],
+            "window": "30d"
+          },
+          {
+            "type": "ai_generated",
+            "model": "feature_generator",
+            "description": "Generate predictive features using ML"
+          }
+        ],
+        "feature_selection": {
+          "method": "correlation_analysis",
+          "threshold": 0.7,
+          "max_features": 50
+        }
+      },
+      "timeout": "40m",
+      "depends_on": ["ai-data-quality"]
+    },
+    {
+      "id": "ml-prediction",
+      "name": "Machine Learning Predictions",
+      "type": "ml",
+      "config": {
+        "models": [
+          {
+            "id": "customer_churn",
+            "type": "classification",
+            "algorithm": "random_forest",
+            "target": "will_churn",
+            "features": "{{feature-engineering.output}}"
+          },
+          {
+            "id": "sales_forecast",
+            "type": "regression",
+            "algorithm": "xgboost",
+            "target": "future_sales",
+            "features": "{{feature-engineering.output}}"
+          }
+        ],
+        "validation": {
+          "method": "time_series_split",
+          "test_size": 0.2,
+          "cross_validation": 5
+        },
+        "deployment": {
+          "format": "onnx",
+          "registry": "model_registry"
+        }
+      },
+      "timeout": "60m",
+      "depends_on": ["feature-engineering"]
+    },
+    {
+      "id": "conditional-load",
+      "name": "Conditional Data Loading",
+      "type": "conditional",
+      "config": {
+        "conditions": [
+          {
+            "expression": "{{ml-prediction.customer_churn.accuracy}} > 0.80",
+            "action": "load_predictions",
+            "target": {
+              "type": "database",
+              "table": "customer_predictions"
+            }
+          },
+          {
+            "expression": "{{ml-prediction.sales_forecast.accuracy}} > 0.75",
+            "action": "load_forecast",
+            "target": {
+              "type": "database", 
+              "table": "sales_forecast"
+            }
+          }
+        ],
+        "default_action": "load_processed_data"
+      },
+      "timeout": "20m",
+      "depends_on": ["ml-prediction"]
+    },
+    {
+      "id": "notification-system",
+      "name": "Multi-Channel Notifications",
+      "type": "notification",
+      "config": {
+        "channels": [
+          {
+            "type": "slack",
+            "webhook": "{{env.SLACK_WEBHOOK}}",
+            "template": "ml_completion",
+            "priority": "high"
+          },
+          {
+            "type": "email",
+            "recipients": ["data-team@company.com"],
+            "template": "analytics_report",
+            "attachments": ["{{conditional-load.output.report}}"]
+          },
+          {
+            "type": "webhook",
+            "url": "{{env.API_ENDPOINT}}/analytics/complete",
+            "payload": {
+              "workflow_id": "{{workflow.id}}",
+              "status": "{{workflow.status}}",
+              "metrics": "{{workflow.metrics}}"
+            }
+          }
+        ]
+      },
+      "timeout": "5m",
+      "depends_on": ["conditional-load"]
+    }
+  ],
+  
+  "parallel_branches": [
+    {
+      "name": "data_lineage",
+      "trigger": "after_step:ai-data-quality",
+      "steps": [
+        {
+          "id": "lineage-tracking",
+          "name": "Track Data Lineage",
+          "type": "metadata",
+          "config": {
+            "track": ["source", "transformations", "quality_metrics"],
+            "output_format": "graph"
+          }
+        }
+      ]
+    },
+    {
+      "name": "compliance_check",
+      "trigger": "after_step:feature-engineering", 
+      "steps": [
+        {
+          "id": "gdpr_validation",
+          "name": "GDPR Compliance Check",
+          "type": "compliance",
+          "config": {
+            "rules": ["data_anonymization", "retention_policy", "consent_verification"],
+            "enforce": false
+          }
+        }
+      ]
+    }
+  ],
+  
+  "error_handling": {
+    "global_strategy": "continue_with_notifications",
+    "step_specific": {
+      "parallel-extract": "retry_then_continue",
+      "ml-prediction": "skip_step_with_warning"
+    }
+  },
+  
+  "monitoring": {
+    "real_time": true,
+    "metrics": [
+      "execution_time",
+      "throughput",
+      "data_volume",
+      "model_accuracy",
+      "cost_per_execution"
+    ],
+    "alerts": [
+      {
+        "condition": "execution_time > 3h",
+        "severity": "warning",
+        "channel": "slack"
+      },
+      {
+        "condition": "model_accuracy < 0.70",
+        "severity": "critical",
+        "channel": "email"
+      }
+    ]
+  },
+  
+  "scaling": {
+    "auto_scaling": {
+      "enabled": true,
+      "min_instances": 1,
+      "max_instances": 5,
+      "scale_criteria": ["cpu", "memory", "queue_length"]
+    },
+    "resource_allocation": {
+      "extract": { "cpu": "2", "memory": "4Gi" },
+      "ai": { "cpu": "4", "memory": "8Gi", "gpu": true },
+      "ml": { "cpu": "8", "memory": "16Gi", "gpu": true }
+    }
+  }
+}

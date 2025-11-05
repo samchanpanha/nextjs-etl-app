@@ -1,0 +1,172 @@
+{
+  "id": "simple-data-pipeline",
+  "name": "Simple Data Pipeline",
+  "description": "Basic ETL workflow for data processing",
+  "version": "1.0.0",
+  "status": "active",
+  "created_at": "2025-11-05T14:53:00Z",
+  "updated_at": "2025-11-05T14:53:00Z",
+  "tags": ["etl", "beginner", "data-processing"],
+  
+  "trigger": {
+    "type": "scheduled",
+    "schedule": "0 */6 * * *",
+    "description": "Every 6 hours"
+  },
+  
+  "steps": [
+    {
+      "id": "extract-data",
+      "name": "Extract Data from Source",
+      "type": "extract",
+      "config": {
+        "source": {
+          "type": "database",
+          "connection": "postgres://localhost:5432/sales_db",
+          "query": "SELECT * FROM daily_transactions WHERE date = CURRENT_DATE - INTERVAL '1 day'"
+        },
+        "output_format": "json",
+        "batch_size": 1000
+      },
+      "timeout": "30m",
+      "retry": {
+        "max_attempts": 3,
+        "delay": "5m"
+      }
+    },
+    {
+      "id": "validate-data",
+      "name": "Validate Data Quality",
+      "type": "transform",
+      "config": {
+        "validation_rules": [
+          {
+            "field": "amount",
+            "type": "range",
+            "min": 0,
+            "max": 1000000
+          },
+          {
+            "field": "customer_id",
+            "type": "not_null"
+          },
+          {
+            "field": "transaction_date",
+            "type": "date_format",
+            "format": "YYYY-MM-DD"
+          }
+        ],
+        "error_handling": "log_and_continue"
+      },
+      "timeout": "10m",
+      "depends_on": ["extract-data"]
+    },
+    {
+      "id": "transform-data",
+      "name": "Transform and Enrich Data",
+      "type": "transform",
+      "config": {
+        "transformations": [
+          {
+            "type": "add_field",
+            "field": "processed_date",
+            "value": "CURRENT_TIMESTAMP"
+          },
+          {
+            "type": "calculate",
+            "field": "amount_usd",
+            "formula": "amount * exchange_rate"
+          },
+          {
+            "type": "map",
+            "field": "customer_segment",
+            "mapping": {
+              "high": "Premium",
+              "medium": "Standard",
+              "low": "Basic"
+            }
+          }
+        ]
+      },
+      "timeout": "20m",
+      "depends_on": ["validate-data"]
+    },
+    {
+      "id": "load-data",
+      "name": "Load to Target Database",
+      "type": "load",
+      "config": {
+        "target": {
+          "type": "database",
+          "connection": "postgres://localhost:5432/analytics_db",
+          "table": "processed_transactions",
+          "mode": "append"
+        },
+        "conflict_resolution": "update",
+        "batch_size": 500
+      },
+      "timeout": "15m",
+      "depends_on": ["transform-data"]
+    },
+    {
+      "id": "send-notification",
+      "name": "Send Completion Notification",
+      "type": "notification",
+      "config": {
+        "channels": [
+          {
+            "type": "email",
+            "recipients": ["admin@company.com"],
+            "template": "job_completion",
+            "variables": {
+              "job_name": "{{workflow.name}}",
+              "status": "{{workflow.status}}",
+              "duration": "{{workflow.duration}}",
+              "records_processed": "{{steps.transform-data.records_processed}}"
+            }
+          }
+        ]
+      },
+      "timeout": "2m",
+      "depends_on": ["load-data"]
+    }
+  ],
+  
+  "notifications": {
+    "on_success": {
+      "channels": ["email"],
+      "template": "workflow_success"
+    },
+    "on_failure": {
+      "channels": ["email", "slack"],
+      "template": "workflow_failure"
+    }
+  },
+  
+  "monitoring": {
+    "metrics": [
+      "execution_time",
+      "records_processed",
+      "error_rate",
+      "memory_usage",
+      "cpu_usage"
+    ],
+    "alerts": [
+      {
+        "condition": "execution_time > 2h",
+        "severity": "warning"
+      },
+      {
+        "condition": "error_rate > 5%",
+        "severity": "critical"
+      }
+    ]
+  },
+  
+  "resources": {
+    "cpu_limit": "2",
+    "memory_limit": "4Gi",
+    "concurrency": 1,
+    "priority": "normal"
+  }
+}
