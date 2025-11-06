@@ -9,7 +9,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"  // Changed from sqlite for banking-grade requirements
   url      = env("DATABASE_URL")
 }
 
@@ -35,7 +35,7 @@ model UserSettings {
   userId     String @unique
   theme      String @default("light")
   timezone   String @default("UTC")
-  language   String @default("en")
+  language   @default("en")
   
   // Notification preferences
   emailNotifications  Boolean @default(true)
@@ -62,6 +62,7 @@ model DataSource {
   jobs        ETLJob[] @relation("JobSource")
   targetJobs  ETLJob[] @relation("JobTarget")
   syncLogs    SyncLog[]
+  immutableAuditLogs ImmutableAuditLog[]
   
   @@map("data_sources")
 }
@@ -83,12 +84,24 @@ model ETLJob {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   
+  // Banking-grade fields
+  dataClassification String @default("PUBLIC")
+  retentionPeriodDays Int   @default(2555) // 7 years for financial data
+  encryptionRequired Boolean @default(false)
+  complianceRequirements String? // JSON string for compliance requirements
+  riskLevel String @default("LOW")
+  dataVolumeThresholdMB Int @default(1000)
+  
   // Relations
   source      DataSource @relation("JobSource", fields: [sourceId], references: [id])
   target      DataSource @relation("JobTarget", fields: [targetId], references: [id])
   creator     User       @relation(fields: [createdBy], references: [id])
   syncLogs    SyncLog[]
   executions  JobExecution[]
+  immutableAuditLogs ImmutableAuditLog[]
+  transactionIntegrity TransactionIntegrity[]
+  deadLetterQueue DeadLetterQueue[]
+  performanceMetrics PerformanceMetrics[]
   
   @@map("etl_jobs")
 }
@@ -105,8 +118,23 @@ model JobExecution {
   errorMessage String?
   logs        String?          // JSON array of log entries
   
+  // Banking-grade fields
+  financialAmount Decimal? @db.Decimal(20,2)
+  currency String @default("USD")
+  checksumRecords String?
+  recordsValidated Int @default(0)
+  transactionId String?
+  processingStartTime DateTime?
+  processingEndTime DateTime?
+  memoryPeakMB Decimal? @db.Decimal(10,2)
+  throughputRecordsPerSec Decimal? @db.Decimal(10,2)
+  
   // Relations
   job         ETLJob           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  immutableAuditLogs ImmutableAuditLog[]
+  transactionIntegrity TransactionIntegrity[]
+  deadLetterQueue DeadLetterQueue[]
+  performanceMetrics PerformanceMetrics[]
   
   @@map("job_executions")
 }
@@ -125,6 +153,107 @@ model SyncLog {
   job         ETLJob?      @relation(fields: [jobId], references: [id])
   
   @@map("sync_logs")
+}
+
+model ImmutableAuditLog {
+  id          String  @id @default(cuid())
+  jobId       String
+  executionId String?
+  transactionId String?
+  eventType   String  @db.VarChar(100)
+  eventData   String  // JSON string with detailed event information
+  hashSignature String @db.VarChar(128)
+  previousHash String @db.VarChar(128)
+  timestamp   DateTime @default(now())
+  checksum    String @db.VarChar(128)
+  
+  // Financial compliance fields
+  amountTotal Decimal? @db.Decimal(20,2)
+  currency String @default("USD")
+  recordCount Int?
+  checksumRecords String?
+  
+  // Relations
+  job       ETLJob        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  execution JobExecution? @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  
+  @@map("immutable_audit_log")
+}
+
+model TransactionIntegrity {
+  id          String  @id @default(cuid())
+  transactionId String @unique
+  jobId       String
+  executionId String
+  totalRecords Int
+  checksumBatch String @db.VarChar(128)
+  recordsValidated Int @default(0)
+  recordsFailed Int @default(0)
+  validationStatus String @default("PENDING")
+  createdAt   DateTime @default(now())
+  validatedAt DateTime?
+  failureReason String?
+  
+  // Relations
+  job       ETLJob        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  execution JobExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  
+  @@map("transaction_integrity")
+}
+
+model DeadLetterQueue {
+  id          String  @id @default(cuid())
+  jobId       String
+  executionId String?
+  transactionId String?
+  failureType String
+  failureReason String
+  payloadData String // JSON string for original failing data
+  retryCount  Int @default(0)
+  maxRetries  Int @default(3)
+  status      String @default("PENDING")
+  createdAt   DateTime @default(now())
+  processedAt DateTime?
+  nextRetryAt DateTime?
+  
+  // Relations
+  job       ETLJob        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  execution JobExecution? @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  
+  @@map("dead_letter_queue")
+}
+
+model CircuitBreakerStates {
+  id          String  @id @default(cuid())
+  serviceName String  @unique
+  state       String  @default("CLOSED")
+  failureCount Int    @default(0)
+  lastFailureTime DateTime?
+  recoveryTimeout Int @default(60)
+  successThreshold Int @default(3)
+  failureThreshold Int @default(5)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+  
+  @@map("circuit_breaker_states")
+}
+
+model PerformanceMetrics {
+  id          String  @id @default(cuid())
+  jobId       String
+  executionId String
+  metricType  String
+  metricName  String
+  metricValue Decimal @db.Decimal(20,8)
+  unit        String
+  timestamp   DateTime @default(now())
+  tags        String? // JSON string for additional metric tags
+  
+  // Relations
+  job       ETLJob        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  execution JobExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  
+  @@map("performance_metrics")
 }
 
 model Notification {

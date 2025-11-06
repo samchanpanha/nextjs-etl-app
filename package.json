@@ -15,7 +15,16 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
-    "deploy:prod": "npm run build && npm run docker:up"
+    "deploy:prod": "npm run build && npm run docker:up",
+    "worker:enhanced": "node scripts/enhanced-job-worker.js",
+    "worker:banking": "node scripts/banking-grade-stress-test.js",
+    "test:integration": "node scripts/banking-workload-integration-test.js",
+    "test:stress": "node scripts/banking-grade-stress-test.js",
+    "db:setup": "npm run db:generate && npm run db:push && node scripts/database-optimization.js",
+    "monitoring:start": "node scripts/start-monitoring.js",
+    "compliance:report": "node scripts/generate-compliance-report.js",
+    "fix:dependencies": "npm audit fix",
+    "clean:node_modules": "rm -rf node_modules && npm install"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -102,5 +111,11 @@
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.5",
     "typescript": "^5"
+  },
+  "overrides": {
+    "intersection-observer": "^0.12.2"
+  },
+  "resolutions": {
+    "intersection-observer": "^0.12.2"
   }
 }
